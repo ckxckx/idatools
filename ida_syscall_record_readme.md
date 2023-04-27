@@ -44,3 +44,10 @@ CONFIG_DEBUG_INFO=y # 启用支持pahole的功能
   系统调用序列存储在 syscall_list，系统调用返回值记录在syscall_ret_list中，
 
   使用过程的输入输出可以通过代码进行调整
+
+
+
+todo:
+
+- syscall64_dict 字典没有收录序号100以上的syscall
+- 考察如何直接通过条件断点简化目前的实现，或许还可以提高执行效率
