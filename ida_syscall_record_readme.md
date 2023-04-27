@@ -36,3 +36,11 @@ ida_syscall_record.py: 基于 ida debugger实现的程序system call执行记录
 CONFIG_USER_NS=y  # 启用 unshare（NEW_USER） 功能
 CONFIG_DEBUG_INFO=y # 启用支持pahole的功能
 ```
+
+
+
+关键结果：
+
+  系统调用序列存储在 syscall_list，系统调用返回值记录在syscall_ret_list中，
+
+  使用过程的输入输出可以通过代码进行调整
