@@ -25,6 +25,40 @@ import traceback
 import re
 import idaapi
 
+
+
+import idaapi
+
+
+def set_python_bpt(ea, cond):
+    ''' Set conditional breakpoint with Python function 
+
+        Usage:
+        set_python_bpt(0x08000688, 'view_regs()')    
+    '''
+    idaapi.add_bpt(ea)
+    bpt = idaapi.bpt_t()
+    idaapi.get_bpt(ea, bpt)
+    bpt.elang = 'Python'
+    bpt.condition = cond
+    idaapi.update_bpt(bpt)
+
+ea = 0x4004F2
+# cond = 'judge()'
+
+# cond = '''
+# def judge():
+#     addr = 0x601030
+#     aaaa = idc.read_dbg_memory(addr,4)
+#     value=struct.unpack("<I",aaaa)[0]
+#     if value == 0:
+#         return False     
+#     else:
+#         return True
+# return judge()
+# '''
+# set_python_bpt(ea, cond)
+
 def get_strncpy_param_offset(func_name):
     # 获取函数地址
     func_addr = idaapi.get_name_ea(0, func_name)
@@ -252,6 +286,21 @@ def record_syscall_ret():
     return item
 
 
+def set_python_bpt(ea, cond):
+    ''' Set conditional breakpoint with Python function 
+
+        Usage:
+        set_python_bpt(0x08000688, 'view_regs()')    
+    '''
+    idaapi.add_bpt(ea)
+    bpt = idaapi.bpt_t()
+    idaapi.get_bpt(ea, bpt)
+    bpt.elang = 'Python'
+    bpt.condition = cond
+    idaapi.update_bpt(bpt)
+
+
+
 
 # 这里有个bug
 syscall_list = []
@@ -267,22 +316,34 @@ class MyDbgHook(DBG_Hooks):
         global break_sysret_list
         commname=get_comm_name()
 
-        if commname != "ls":
-            if commname == "curl":
-                if ea  == ea_entry:
-                    print("=====================================")
-                    item = record_syscall()
-                    syscall_list.append(item)
-                    print("syscall: " + item[0])
-                    continue_process()
-                    pass
-                elif ea in break_sysret_list:
-                    item = record_syscall_ret()
-                    syscall_ret_list.append(item)
-                    continue_process()
-            else:
-                continue_process()
-            return 0
+
+        if ea  == ea_entry:
+            print("=====================================")
+            item = record_syscall()
+            syscall_list.append(item)
+            print("syscall: " + item[0])
+            continue_process()
+            pass
+        elif ea in break_sysret_list:
+            item = record_syscall_ret()
+            syscall_ret_list.append(item)
+            continue_process()
+        # if commname == "curl":
+        #     if ea  == ea_entry:
+        #         print("=====================================")
+        #         item = record_syscall()
+        #         syscall_list.append(item)
+        #         print("syscall: " + item[0])
+        #         continue_process()
+        #         pass
+        #     elif ea in break_sysret_list:
+        #         item = record_syscall_ret()
+        #         syscall_ret_list.append(item)
+        #         continue_process()
+        # else:
+        #     print(">>>>>> not expected <<<<<<<")
+        #     continue_process()
+        return 0
 
 
        
@@ -304,9 +365,104 @@ debughook.hook()
 
 func_name = "entry_SYSCALL_64_after_swapgs"
 func_addr = idaapi.get_name_ea(0, func_name)
-ida_dbg.add_bpt(func_addr)
+# ida_dbg.add_bpt(func_addr)
 
 
+
+
+# 实际速率更慢了，条件断点的每个位置都需要import一遍上下文 ... 
+# 所以这种模式宣告失败。
+
+cond_specify_comm_fmt=r'''
+import re
+import idaapi
+import idc
+import ida_dbg
+import struct
+
+# comm_current_offset = get_strncpy_param_offset("get_task_comm")
+# current_gs_offset = get_current_offset()
+
+def get_strncpy_param_offset(func_name):
+    # 获取函数地址
+    func_addr = idaapi.get_name_ea(0, func_name)
+
+    # 获取函数对象
+    func = idaapi.get_func(func_addr)
+
+    # 反汇编函数
+    dism = idaapi.decompile(func)
+
+    # 从反汇编结果中查找strncpy函数的调用语句
+    pattern = r"strncpy(.+?)\);"
+    match = re.search(pattern, str(dism))
+
+    if match:
+        # 获取strncpy函数的第二个参数的值
+        param2 = re.search(r"a2 \+ (\d+)", match.group(1)).group(1)
+        return int(param2)
+    else:
+        return None
+def get_current_offset():
+    # 获取函数地址
+    func_ea = idaapi.get_name_ea(0, "sys_getpid")
+
+    # 获取函数对象
+    func_til = idaapi.get_func(func_ea).start_ea
+
+    # 反汇编函数
+    disasm = idaapi.decompile(func_til)
+
+    # 打印反汇编结果
+    # print(disasm)
+
+    if "readgsqword" in str(disasm):
+        # 使用正则表达式提取readgsqword后括号中的内容
+        text = str(disasm)
+        match = re.search(r'0x[\da-fA-F]+', text)
+        if match:
+            hex_num = match.group()
+            # print(hex_num)
+            return int(hex_num,16)
+        else:
+            print("No match found")
+
+def get_current_pointer():
+    # current_pointer = idc.GetRegValue("gs:" + hex(current_gs_offset))
+    gs_base = ida_dbg.get_reg_val("gs_base")
+    current_gs_offset = get_current_offset()
+    current_address = gs_base + current_gs_offset
+    # current_pointer = idc.GetQword(current_address)
+    current_pointer_bts = idc.read_dbg_memory(current_address,8)
+    current_pointer=struct.unpack("<Q",current_pointer_bts)[0]
+    return current_pointer
+
+def get_comm_name():
+    current_pointer = get_current_pointer()
+    comm_current_offset = get_strncpy_param_offset("get_task_comm")
+    comm_address = current_pointer + comm_current_offset
+    # comm_name = idc.GetString(comm_address)
+    comm_name_16bts = idc.read_dbg_memory(comm_address,16)
+    # print(comm_name_16bts)
+
+    comm_name = comm_name_16bts.split(b'\x00', 1)[0].decode('utf-8', 'ignore')
+    # print(comm_name)
+    return comm_name
+
+def judge_comm(comm_name_ref):
+    comm_name = get_comm_name()
+    if comm_name == comm_name_ref:
+        return True
+    else:
+        return False
+
+return judge_comm("{comm_name_ref}")
+'''
+
+
+cond_specify_comm = cond_specify_comm_fmt.format(comm_name_ref="curl")
+
+set_python_bpt(func_addr, cond_specify_comm)
 
 ea_entry = func_addr
 
@@ -314,8 +470,10 @@ sysret_list = get_sysret_list()
 
 
 for ea in sysret_list:
-    ida_dbg.add_bpt(ea-3) # break before swapgs
+    # ida_dbg.add_bpt(ea-3) # break before swapgs
+    set_python_bpt(ea-3, cond_specify_comm)
     break_sysret_list.append(ea-3)
+
 
 
 
